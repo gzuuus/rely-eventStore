@@ -5,7 +5,6 @@ import (
 	"log"
 	"slices"
 
-	"github.com/fiatjaf/eventstore/slicestore"
 	"github.com/fiatjaf/eventstore/sqlite3"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/pippellia-btc/rely"
@@ -13,7 +12,7 @@ import (
 
 var (
 	db             sqlite3.SQLite3Backend
-	ephemeralStore *slicestore.SliceStore
+	ephemeralStore *CircularBuffer
 )
 
 func main() {
@@ -26,7 +25,7 @@ func main() {
 		panic(err)
 	}
 
-	ephemeralStore = &slicestore.SliceStore{MaxLimit: 500}
+	ephemeralStore = NewCircularBuffer(5)
 	if err := ephemeralStore.Init(); err != nil {
 		panic(err)
 	}
@@ -36,7 +35,7 @@ func main() {
 	relay.OnFilters = Query
 
 	addr := "localhost:3334"
-	log.Printf("running relay on %s", addr)
+	log.Printf("[RELAY] running on %s", addr)
 
 	if err := relay.StartAndServe(ctx, addr); err != nil {
 		panic(err)
@@ -44,17 +43,17 @@ func main() {
 }
 
 func Save(c *rely.Client, e *nostr.Event) error {
-	log.Printf("received event: %v", e)
+	log.Printf("[EVENT] received: %s (kind: %d)", e.ID, e.Kind)
 	ctx := context.Background()
 
 	switch {
 	case nostr.IsEphemeralKind(e.Kind):
 		err := ephemeralStore.SaveEvent(ctx, e)
 		if err != nil {
-			log.Printf("error storing ephemeral event: %v", err)
+			log.Printf("[ERROR] storing ephemeral event: %v", err)
 			return err
 		}
-		log.Printf("ephemeral event stored temporarily: %s", e.ID)
+		log.Printf("[EPHEMERAL] stored: %s", e.ID)
 		return nil
 
 	case nostr.IsReplaceableKind(e.Kind), nostr.IsAddressableKind(e.Kind):
@@ -63,10 +62,10 @@ func Save(c *rely.Client, e *nostr.Event) error {
 	default:
 		err := db.SaveEvent(ctx, e)
 		if err != nil {
-			log.Printf("error saving regular event: %v", err)
+			log.Printf("[ERROR] saving regular event: %v", err)
 			return err
 		}
-		log.Printf("regular event saved successfully: %s", e.ID)
+		log.Printf("[REGULAR] saved: %s", e.ID)
 		return nil
 	}
 }
@@ -74,15 +73,15 @@ func Save(c *rely.Client, e *nostr.Event) error {
 func saveReplaceableEvent(ctx context.Context, e *nostr.Event) error {
 	err := db.ReplaceEvent(ctx, e)
 	if err != nil {
-		log.Printf("error saving replaceable/addressable event: %v", err)
+		log.Printf("[ERROR] saving replaceable/addressable event: %v", err)
 		return err
 	}
-	log.Printf("replaceable/addressable event saved successfully: %s", e.ID)
+	log.Printf("[REPLACEABLE] saved: %s", e.ID)
 	return nil
 }
 
 func Query(ctx context.Context, c *rely.Client, filters nostr.Filters) ([]nostr.Event, error) {
-	log.Printf("received filters %v", filters)
+	log.Printf("[QUERY] received filters with %d subscriptions", len(filters))
 
 	capacity := estimateCapacityFromFilters(filters)
 	result := make([]nostr.Event, 0, capacity)
@@ -91,30 +90,36 @@ func Query(ctx context.Context, c *rely.Client, filters nostr.Filters) ([]nostr.
 		hasEphemeralKinds := false
 		if len(filter.Kinds) > 0 {
 			hasEphemeralKinds = slices.ContainsFunc(filter.Kinds, nostr.IsEphemeralKind)
+			log.Printf("[DEBUG] filter has kinds: %v, hasEphemeralKinds: %v", filter.Kinds, hasEphemeralKinds)
+		} else {
+			// If no kinds specified, assume all kinds including ephemeral
+			hasEphemeralKinds = true
+			log.Printf("[DEBUG] filter has no kinds specified, assuming hasEphemeralKinds: true")
 		}
 
 		eventChan, err := db.QueryEvents(ctx, filter)
 		if err != nil {
-			log.Printf("error querying events: %v", err)
+			log.Printf("[ERROR] querying events: %v", err)
 			return nil, err
 		}
 		for event := range eventChan {
 			result = append(result, *event)
 		}
 
-		if hasEphemeralKinds {
-			ephemeralChan, err := ephemeralStore.QueryEvents(ctx, filter)
-			if err != nil {
-				log.Printf("error querying ephemeral events: %v", err)
-			} else {
-				for event := range ephemeralChan {
-					result = append(result, *event)
-				}
+		// Always query ephemeral store for events, regardless of filter kinds
+		// This ensures we don't miss any ephemeral events
+		log.Printf("[DEBUG] querying ephemeral store for filter: %v", filter)
+		ephemeralChan, err := ephemeralStore.QueryEvents(ctx, filter)
+		if err != nil {
+			log.Printf("[ERROR] querying ephemeral events: %v", err)
+		} else {
+			for event := range ephemeralChan {
+				result = append(result, *event)
 			}
 		}
 	}
 
-	log.Printf("found %d events matching filters", len(result))
+	log.Printf("[QUERY] found %d events matching filters", len(result))
 	return result, nil
 }
 
