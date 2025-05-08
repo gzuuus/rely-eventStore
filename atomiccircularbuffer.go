@@ -18,40 +18,14 @@ type AtomicCircularBuffer struct {
 	tail   uint64 // atomic
 	size   uint64
 	count  uint64 // atomic
-
-	// MaxLimit is the maximum number of events to store in the buffer
-	MaxLimit int
 }
 
 // NewAtomicCircularBuffer creates a new AtomicCircularBuffer with the specified capacity.
 func NewAtomicCircularBuffer(capacity int) *AtomicCircularBuffer {
 	return &AtomicCircularBuffer{
-		buffer:   make([]nostr.Event, capacity),
-		size:     uint64(capacity),
-		MaxLimit: capacity,
+		buffer: make([]nostr.Event, capacity),
+		size:   uint64(capacity),
 	}
-}
-
-// Init initializes the circular buffer.
-func (cb *AtomicCircularBuffer) Init() error {
-	if cb.MaxLimit <= 0 {
-		return errors.New("max limit must be greater than 0")
-	}
-
-	// If buffer is already initialized with correct size, just reset it
-	if cb.buffer != nil && len(cb.buffer) == cb.MaxLimit {
-		atomic.StoreUint64(&cb.head, 0)
-		atomic.StoreUint64(&cb.tail, 0)
-		atomic.StoreUint64(&cb.count, 0)
-		return nil
-	}
-
-	cb.buffer = make([]nostr.Event, cb.MaxLimit)
-	cb.size = uint64(cb.MaxLimit)
-	atomic.StoreUint64(&cb.head, 0)
-	atomic.StoreUint64(&cb.tail, 0)
-	atomic.StoreUint64(&cb.count, 0)
-	return nil
 }
 
 // SaveEvent adds a new event to the circular buffer.
@@ -74,7 +48,7 @@ func (cb *AtomicCircularBuffer) SaveEvent(ctx context.Context, evt *nostr.Event)
 	if count > cb.size {
 		// Buffer is full, advance tail to overwrite oldest
 		atomic.CompareAndSwapUint64(&cb.count, count, cb.size)
-		atomic.StoreUint64(&cb.tail, (atomic.LoadUint64(&cb.tail) + 1) % cb.size)
+		atomic.StoreUint64(&cb.tail, (atomic.LoadUint64(&cb.tail)+1)%cb.size)
 	}
 
 	return nil

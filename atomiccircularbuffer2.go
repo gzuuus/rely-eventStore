@@ -18,38 +18,19 @@ type AtomicCircularBuffer2 struct {
 	head   uint64 // atomic - position to write next event
 	count  uint64 // atomic - number of events in buffer
 	size   uint64 // fixed size of the buffer
-
-	// MaxLimit is the maximum number of events to store in the buffer
-	MaxLimit int
 }
 
 // NewAtomicCircularBuffer2 creates a new AtomicCircularBuffer2 with the specified capacity.
 func NewAtomicCircularBuffer2(capacity int) *AtomicCircularBuffer2 {
+	if capacity <= 0 {
+		panic("capacity must be greater than 0")
+	}
+
 	return &AtomicCircularBuffer2{
-		buffer:   make([]nostr.Event, capacity),
-		size:     uint64(capacity),
-		MaxLimit: capacity,
+		buffer: make([]nostr.Event, capacity),
+		size:   uint64(capacity),
+		// head and count are initialized to 0 by default
 	}
-}
-
-// Init initializes the circular buffer.
-func (cb *AtomicCircularBuffer2) Init() error {
-	if cb.MaxLimit <= 0 {
-		return errors.New("max limit must be greater than 0")
-	}
-
-	// If buffer is already initialized with correct size, just reset it
-	if cb.buffer != nil && len(cb.buffer) == cb.MaxLimit {
-		atomic.StoreUint64(&cb.head, 0)
-		atomic.StoreUint64(&cb.count, 0)
-		return nil
-	}
-
-	cb.buffer = make([]nostr.Event, cb.MaxLimit)
-	cb.size = uint64(cb.MaxLimit)
-	atomic.StoreUint64(&cb.head, 0)
-	atomic.StoreUint64(&cb.count, 0)
-	return nil
 }
 
 // SaveEvent adds a new event to the circular buffer.

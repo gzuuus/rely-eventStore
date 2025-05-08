@@ -12,7 +12,7 @@ import (
 
 var (
 	db             sqlite3.SQLite3Backend
-	ephemeralStore *AtomicCircularBuffer
+	ephemeralStore *AtomicCircularBuffer2
 )
 
 func main() {
@@ -21,14 +21,8 @@ func main() {
 	go rely.HandleSignals(cancel)
 
 	db = sqlite3.SQLite3Backend{DatabaseURL: "./rely-sqlite.db"}
-	if err := db.Init(); err != nil {
-		panic(err)
-	}
 
-	ephemeralStore = NewAtomicCircularBuffer(5)
-	if err := ephemeralStore.Init(); err != nil {
-		panic(err)
-	}
+	ephemeralStore = NewAtomicCircularBuffer2(500)
 
 	relay := rely.NewRelay()
 	relay.OnEvent = Save
@@ -38,7 +32,6 @@ func main() {
 	log.Printf("[RELAY] running on %s", addr)
 
 	if err := relay.StartAndServe(ctx, addr); err != nil {
-		panic(err)
 	}
 }
 
@@ -109,12 +102,14 @@ func Query(ctx context.Context, c *rely.Client, filters nostr.Filters) ([]nostr.
 		// Always query ephemeral store for events, regardless of filter kinds
 		// This ensures we don't miss any ephemeral events
 		log.Printf("[DEBUG] querying ephemeral store for filter: %v", filter)
-		ephemeralChan, err := ephemeralStore.QueryEvents(ctx, filter)
+		events, err := ephemeralStore.QueryEvents(ctx, filter)
 		if err != nil {
 			log.Printf("[ERROR] querying ephemeral events: %v", err)
 		} else {
-			for event := range ephemeralChan {
-				result = append(result, *event)
+			for _, event := range events {
+				if event != nil {
+					result = append(result, *event)
+				}
 			}
 		}
 	}

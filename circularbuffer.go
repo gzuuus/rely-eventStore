@@ -20,43 +20,14 @@ type CircularBuffer struct {
 	tail   int
 	size   int
 	count  int
-
-	// MaxLimit is the maximum number of events to store in the buffer
-	MaxLimit int
 }
 
 // NewCircularBuffer creates a new CircularBuffer with the specified capacity.
 func NewCircularBuffer(capacity int) *CircularBuffer {
 	return &CircularBuffer{
-		buffer:   make([]nostr.Event, capacity),
-		size:     capacity,
-		MaxLimit: capacity,
+		buffer: make([]nostr.Event, capacity),
+		size:   capacity,
 	}
-}
-
-// Init initializes the circular buffer.
-func (cb *CircularBuffer) Init() error {
-	cb.Lock()
-	defer cb.Unlock()
-
-	if cb.MaxLimit <= 0 {
-		return errors.New("max limit must be greater than 0")
-	}
-
-	// If buffer is already initialized with correct size, just reset it
-	if cb.buffer != nil && len(cb.buffer) == cb.MaxLimit {
-		cb.head = 0
-		cb.tail = 0
-		cb.count = 0
-		return nil
-	}
-
-	cb.buffer = make([]nostr.Event, cb.MaxLimit)
-	cb.size = cb.MaxLimit
-	cb.head = 0
-	cb.tail = 0
-	cb.count = 0
-	return nil
 }
 
 // SaveEvent adds a new event to the circular buffer.
