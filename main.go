@@ -12,7 +12,7 @@ import (
 
 var (
 	db             sqlite3.SQLite3Backend
-	ephemeralStore *CircularBuffer
+	ephemeralStore *AtomicCircularBuffer
 )
 
 func main() {
@@ -25,7 +25,7 @@ func main() {
 		panic(err)
 	}
 
-	ephemeralStore = NewCircularBuffer(5)
+	ephemeralStore = NewAtomicCircularBuffer(5)
 	if err := ephemeralStore.Init(); err != nil {
 		panic(err)
 	}
