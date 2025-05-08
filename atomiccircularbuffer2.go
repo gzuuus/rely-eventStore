@@ -11,10 +11,11 @@ import (
 
 // AtomicCircularBuffer2 is an optimized, lock-free, fixed-size circular buffer for storing Nostr events.
 // It efficiently manages ephemeral events with a fixed memory footprint and automatic
-// oldest-event replacement when full using atomic operations for thread safety.
+// event replacement when full using atomic operations for thread safety.
 // This implementation eliminates the explicit tail pointer and uses slice-based query results.
+// It uses atomic pointers to events to prevent data races between concurrent reads and writes.
 type AtomicCircularBuffer2 struct {
-	buffer []nostr.Event
+	buffer []atomic.Pointer[nostr.Event]
 	head   uint64 // atomic - position to write next event
 	count  uint64 // atomic - number of events in buffer
 	size   uint64 // fixed size of the buffer
@@ -26,8 +27,10 @@ func NewAtomicCircularBuffer2(capacity int) *AtomicCircularBuffer2 {
 		panic("capacity must be greater than 0")
 	}
 
+	buffer := make([]atomic.Pointer[nostr.Event], capacity)
+
 	return &AtomicCircularBuffer2{
-		buffer: make([]nostr.Event, capacity),
+		buffer: buffer,
 		size:   uint64(capacity),
 		// head and count are initialized to 0 by default
 	}
@@ -40,15 +43,18 @@ func (cb *AtomicCircularBuffer2) SaveEvent(ctx context.Context, evt *nostr.Event
 		return errors.New("event cannot be nil")
 	}
 
+	// Create a copy of the event to store in the buffer
+	eventCopy := *evt
+
 	// Atomically get the current head
 	head := atomic.LoadUint64(&cb.head)
-	
-	// Store the event at the current head position
-	cb.buffer[head] = *evt
-	
+
+	// Store the event at the current head position using atomic operation
+	cb.buffer[head].Store(&eventCopy)
+
 	// Atomically increment the head with wrap-around
 	atomic.StoreUint64(&cb.head, (head+1)%cb.size)
-	
+
 	// Update count atomically, capping at buffer size
 	count := atomic.AddUint64(&cb.count, 1)
 	if count > cb.size {
@@ -63,9 +69,8 @@ func (cb *AtomicCircularBuffer2) SaveEvent(ctx context.Context, evt *nostr.Event
 // goroutine creation and channel operations.
 func (cb *AtomicCircularBuffer2) QueryEvents(ctx context.Context, filter nostr.Filter) ([]*nostr.Event, error) {
 	// Get a snapshot of the current state
-	head := atomic.LoadUint64(&cb.head)
 	count := atomic.LoadUint64(&cb.count)
-	
+
 	// No events in buffer
 	if count == 0 {
 		return []*nostr.Event{}, nil
@@ -80,21 +85,14 @@ func (cb *AtomicCircularBuffer2) QueryEvents(ctx context.Context, filter nostr.F
 	// Pre-allocate the result slice
 	result := make([]*nostr.Event, 0, limit)
 
-	// Calculate tail position (oldest event)
-	// When buffer is not full, tail is at position 0
-	// When buffer is full, tail is at position head (oldest event gets overwritten)
-	tail := uint64(0)
-	if count >= cb.size {
-		// Buffer is full, tail is at the same position as head
-		tail = head
-	}
+	// Determine how many positions to scan - use min to get the smaller of count or size
+	scanCount := min(count, cb.size)
 
-	// Iterate through the buffer starting from the oldest event
-	for i := uint64(0); i < count; i++ {
-		// Calculate position: start from tail and move forward
-		pos := (tail + i) % cb.size
-		evt := &cb.buffer[pos]
-		if cb.eventMatchesFilter(evt, filter) {
+	// Iterate through the buffer - no need for tail calculation
+	for i := uint64(0); i < scanCount; i++ {
+		// Load the event atomically
+		evt := cb.buffer[i].Load()
+		if evt != nil && cb.eventMatchesFilter(evt, filter) {
 			result = append(result, evt)
 			if len(result) >= limit {
 				break
