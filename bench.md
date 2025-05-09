@@ -1,4 +1,4 @@
-## Benchmark Data Analysis Report
+# Benchmark Data Analysis Report
 
 This report analyzes the updated benchmark results from the `rely-evstore` Go package, executed on a 13th Gen Intel Core i7-13700H (Linux, amd64). The benchmarks compare three implementations (Original, Atomic, and Atomic2) across various operations: single writes, concurrent writes, queries, and mixed operations.
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -324,8 +323,8 @@ func TestAtomicCircularBuffer2(t *testing.T) {
 
 	// Print buffer state before query
 	t.Logf("Buffer state: head=%d, count=%d, size=%d",
-		atomic.LoadUint64(&cb.head),
-		atomic.LoadUint64(&cb.count),
+		cb.head.Load(),
+		cb.count.Load(),
 		cb.size)
 
 	// Now buffer should have events 3-7 (5 events)
