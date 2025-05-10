@@ -58,6 +58,18 @@ func BenchmarkSingleWrite_Atomic2(b *testing.B) {
 	}
 }
 
+// BenchmarkSingleWrite_Ephemeral tests single-threaded write performance of Ephemeral
+func BenchmarkSingleWrite_Ephemeral(b *testing.B) {
+	cb := NewEphemeral(1000)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		evt := createTestEvent(fmt.Sprintf("id-%d", i), i%5)
+		cb.Save(ctx, evt)
+	}
+}
+
 // BenchmarkConcurrentWrite_Original tests concurrent write performance of original CircularBuffer
 func BenchmarkConcurrentWrite_Original(b *testing.B) {
 	cb := NewCircularBuffer(1000)
@@ -101,6 +113,22 @@ func BenchmarkConcurrentWrite_Atomic2(b *testing.B) {
 		for pb.Next() {
 			evt := createTestEvent(fmt.Sprintf("id-%d", counter), counter%5)
 			cb.SaveEvent(ctx, evt)
+			counter++
+		}
+	})
+}
+
+// BenchmarkConcurrentWrite_Ephemeral tests concurrent write performance of Ephemeral
+func BenchmarkConcurrentWrite_Ephemeral(b *testing.B) {
+	cb := NewEphemeral(1000)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		counter := 0
+		for pb.Next() {
+			evt := createTestEvent(fmt.Sprintf("id-%d", counter), counter%5)
+			cb.Save(ctx, evt)
 			counter++
 		}
 	})
@@ -175,6 +203,28 @@ func BenchmarkQuery_Atomic2(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = cb.QueryEvents(ctx, filter)
+	}
+}
+
+// BenchmarkQuery_Ephemeral tests query performance of Ephemeral
+func BenchmarkQuery_Ephemeral(b *testing.B) {
+	cb := NewEphemeral(1000)
+	ctx := context.Background()
+	
+	// Fill buffer with events
+	for i := range 500 {
+		evt := createTestEvent(fmt.Sprintf("id-%d", i), i%5)
+		cb.Save(ctx, evt)
+	}
+	
+	filter := nostr.Filter{
+		Kinds: []int{1, 2, 3},
+		Limit: 100,
+	}
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = cb.Query(ctx, &filter)
 	}
 }
 
@@ -275,6 +325,39 @@ func BenchmarkMixed_Atomic2(b *testing.B) {
 			} else {
 				evt := createTestEvent(fmt.Sprintf("mixed-%d", counter), counter%5)
 				cb.SaveEvent(ctx, evt)
+			}
+			counter++
+		}
+	})
+}
+
+// BenchmarkMixed_Ephemeral tests mixed read/write workload on Ephemeral
+func BenchmarkMixed_Ephemeral(b *testing.B) {
+	cb := NewEphemeral(1000)
+	ctx := context.Background()
+
+	// Pre-fill with some data
+	for i := range 500 {
+		evt := createTestEvent(fmt.Sprintf("prefill-%d", i), i%5)
+		cb.Save(ctx, evt)
+	}
+
+	filter := nostr.Filter{
+		Kinds: []int{1, 2, 3, 4},
+		Limit: 50,
+	}
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		counter := 0
+		for pb.Next() {
+			// Alternate between read and write operations
+			if counter%2 == 0 {
+				_, _ = cb.Query(ctx, &filter)
+				// No need to consume events as we get a slice directly
+			} else {
+				evt := createTestEvent(fmt.Sprintf("mixed-%d", counter), counter%5)
+				cb.Save(ctx, evt)
 			}
 			counter++
 		}
